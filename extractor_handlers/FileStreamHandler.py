@@ -1,6 +1,6 @@
 import os
 
-from StreamHandlerBase import StreamHandler
+from .StreamHandlerBase import StreamHandler
 
 
 class FileStreamHandler(StreamHandler):

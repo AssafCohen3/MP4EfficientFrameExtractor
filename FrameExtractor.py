@@ -1,10 +1,15 @@
 import os
-import cv2
+from typing import List
 
+import cv2
+from extractor_codecs.FrameExtractorCodecBase import FrameExtractorCodec
 from FrameExtractorExceptions import *
 from FrameExtractorConstants import *
 from FrameExtractorHelpers import *
-from StreamHandlerBase import StreamHandler
+from extractor_codecs.H264Codec import H264Codec
+from extractor_codecs.H265Codec import H265Codec
+from extractor_codecs.MPEG4Codec import MPEG4Codec
+from extractor_handlers.StreamHandlerBase import StreamHandler
 
 
 class FrameExtractor:
@@ -40,6 +45,7 @@ class FrameExtractor:
         # the size of the processed file
         self.file_size = None
         # caching the boxes for the extractor
+        self.codecs: List[FrameExtractorCodec] = [H264Codec(), H265Codec(), MPEG4Codec()]
         self.boxes = {}
 
     def print_verbose(self, to_print, verbose_level):
@@ -65,32 +71,33 @@ class FrameExtractor:
 
             if atom_size == 0:  # box extends to the end of file
                 atom_size = self.get_file_size() - offset - 4
-                if atom_type.decode(encoding='UTF-8') == box_name:
+                if box_name is None or atom_type.decode(encoding='UTF-8') == box_name:
                     box_size = atom_size
                     break
                 return 0, 0  # we have nothing more to look for
             elif atom_size == 1:  # 64 bit-size
                 atom_size = self.read_unsigned_long_direct(offset + 8)
 
-            if atom_type.decode(encoding='UTF-8') == box_name:
+            if box_name is None or atom_type.decode(encoding='UTF-8') == box_name:
                 box_size = atom_size
                 break
             offset += atom_size
             self.print_verbose('%s    size    %12d' % (atom_type.decode(encoding='UTF-8'), atom_size), BOX_FINDERS_VERBOSE)
-        self.print_verbose('found! %s    size    %12d' % (atom_type.decode(encoding='UTF-8'), atom_size), BOX_FINDERS_VERBOSE)
-        return box_size, offset
+        if box_name is None or atom_type.decode(encoding='UTF-8') == box_name:
+            self.print_verbose('found! %s    size    %12d' % (atom_type.decode(encoding='UTF-8'), atom_size), BOX_FINDERS_VERBOSE)
+        return box_size, offset, atom_type.decode(encoding='UTF-8')
 
     def look_for_video_trak(self, start_offset, end):
         offs = start_offset
         video_trak = 0
         while offs + 8 < end:
-            trak_size, trak_offs = self.find_box('trak', offs, end)
+            trak_size, trak_offs, _ = self.find_box('trak', offs, end)
             if trak_size == 0:
                 raise BoxNotFoundException("trak")
-            mdia_size, mdia_offs = self.find_box('mdia', trak_offs + 8, trak_offs + trak_size)
+            mdia_size, mdia_offs, _ = self.find_box('mdia', trak_offs + 8, trak_offs + trak_size)
             if mdia_size == 0:
                 raise BoxNotFoundException("mdia")
-            hdlr_size, hdlr_offs = self.find_box('hdlr', mdia_offs + 8, mdia_offs + mdia_size)
+            hdlr_size, hdlr_offs, _ = self.find_box('hdlr', mdia_offs + 8, mdia_offs + mdia_size)
             if hdlr_size == 0:
                 raise BoxNotFoundException("hdlr")
 
@@ -266,39 +273,21 @@ class FrameExtractor:
         while offset_in_box < stsd_size:
             entry_bytes = self.get_bytes(stsd_offset + offset_in_box, 16)
             entry_size = read_unsigned_integer(entry_bytes, 0)
+            entry_type = read_characters(entry_bytes, 4)
             entry_id = read_unsigned_short(entry_bytes, 14)
             if entry_id == target_sample_id:
-                return entry_size, stsd_offset + offset_in_box
+                return entry_size, stsd_offset + offset_in_box, entry_type.decode(encoding='UTF-8')
             offset_in_box += entry_size
         raise SampleDescriptionDataNotFoundException(target_sample_id)
 
-    def get_codec_private_bytes_from_vsd_box(self, vsd_offset, vsd_size):
-        codec_private_bytes = bytes()
-        offset_in_box = 86
-        avc_size, avc_offset = self.find_box('avcC', vsd_offset + offset_in_box, vsd_offset + vsd_size)
-        if avc_size == 0:
-            raise BoxNotFoundException('avcC')
-        offset_in_box = 14
-        nals_number = (self.read_unsigned_byte_direct(avc_offset + 12) & 3) + 1
-        sps_number = self.read_unsigned_byte_direct(avc_offset + 13) & 31
-        for i in range(0, sps_number):
-            sps_size = self.read_unsigned_short_direct(avc_offset + offset_in_box)
-            sps_bytes = self.get_bytes(avc_offset + offset_in_box + 3, sps_size - 1)
-            codec_private_bytes += bytes([0, 0, 0, 1, 103])
-            codec_private_bytes += sps_bytes
-            offset_in_box += sps_size + 2
-        pps_number = self.read_unsigned_byte_direct(avc_offset + offset_in_box) & 31
-        offset_in_box += 1
-        for i in range(0, pps_number):
-            pps_size = self.read_unsigned_short_direct(avc_offset + offset_in_box)
-            pps_bytes = self.get_bytes(avc_offset + offset_in_box + 3, pps_size - 1)
-            codec_private_bytes += bytes([0, 0, 0, 1, 104])
-            codec_private_bytes += pps_bytes
-            offset_in_box += pps_size + 2
-        return nals_number, codec_private_bytes
+    def detect_codec(self, vsd_type):
+        for codec in self.codecs:
+            if codec.get_name() == vsd_type:
+                return codec
+        return None
 
     def find_boxes(self):
-        moov_size, moov_offs = self.find_box('moov', 0, self.get_file_size())
+        moov_size, moov_offs, _ = self.find_box('moov', 0, self.get_file_size())
         if moov_size == 0:
             raise BoxNotFoundException('moov')
         moov_end = moov_offs + moov_size + 4
@@ -306,32 +295,32 @@ class FrameExtractor:
         if not video_found:
             raise VideoTrakNotFoundException()
         self.print_verbose('Video Trak Number %d found' % video_trak, BOX_FINDERS_VERBOSE)
-        minf_size, minf_offs = self.find_box('minf', mdia_offs + 8, mdia_offs + mdia_size)
+        minf_size, minf_offs, _ = self.find_box('minf', mdia_offs + 8, mdia_offs + mdia_size)
         if minf_size == 0:
             raise BoxNotFoundException('minf')
-        stbl_size, stbl_offs = self.find_box('stbl', minf_offs + 8, minf_offs + minf_size)
+        stbl_size, stbl_offs, _ = self.find_box('stbl', minf_offs + 8, minf_offs + minf_size)
         if stbl_size == 0:
             raise BoxNotFoundException('stbl')
 
-        stsd_size, stsd_offs = self.find_box('stsd', stbl_offs + 8, stbl_offs + stbl_size)
+        stsd_size, stsd_offs, _ = self.find_box('stsd', stbl_offs + 8, stbl_offs + stbl_size)
         if stsd_size == 0:
             raise BoxNotFoundException('stsd')
         self.boxes['stsd'] = (stsd_size, stsd_offs)
-        stss_size, stss_offs = self.find_box('stss', stbl_offs + 8, stbl_offs + stbl_size)
+        stss_size, stss_offs, _ = self.find_box('stss', stbl_offs + 8, stbl_offs + stbl_size)
         if stss_size == 0:
             raise BoxNotFoundException('stss')
         self.boxes['stss'] = (stss_size, stss_offs)
-        stsc_size, stsc_offs = self.find_box('stsc', stbl_offs + 8, stbl_offs + stbl_size)
+        stsc_size, stsc_offs, _ = self.find_box('stsc', stbl_offs + 8, stbl_offs + stbl_size)
         if stsc_size == 0:
             raise BoxNotFoundException('stsc')
         self.boxes['stsc'] = (stsc_size, stsc_offs)
-        stsz_size, stsz_offs = self.find_box('stsz', stbl_offs + 8, stbl_offs + stbl_size)
+        stsz_size, stsz_offs, _ = self.find_box('stsz', stbl_offs + 8, stbl_offs + stbl_size)
         if stsz_size == 0:
             raise BoxNotFoundException('stsz')
         self.boxes['stsz'] = (stsz_size, stsz_offs)
-        stco_size, stco_offs = self.find_box('stco', stbl_offs + 8, stbl_offs + stbl_size)
+        stco_size, stco_offs, _ = self.find_box('stco', stbl_offs + 8, stbl_offs + stbl_size)
         if stco_size == 0:
-            co64_size, co64_offs = self.find_box('co64', stbl_offs + 8, stbl_offs + stbl_size)
+            co64_size, co64_offs, _ = self.find_box('co64', stbl_offs + 8, stbl_offs + stbl_size)
             if co64_size == 0:
                 raise BoxNotFoundException('stco|co64')
             self.boxes['co64'] = (co64_size, co64_offs)
@@ -345,7 +334,7 @@ class FrameExtractor:
 
     def collect_target_samples(self):
         target_sample_number = self.get_target_key_sample()
-        self.print_verbose(f"target key sample number: {target_sample_number}", ALG_VARS_VERBOSE)
+        self.print_verbose(f"target sample number: {target_sample_number}", ALG_VARS_VERBOSE)
         number_of_samples = self.get_number_of_samples()
         target_samples_numbers = [n for n in range(target_sample_number, max(target_sample_number + 1,
                                                                              min(number_of_samples - self.frames_limit_from_end,
@@ -365,8 +354,13 @@ class FrameExtractor:
                 zip(target_samples, target_chunks_offsets)]
 
     def retrieve_and_decode_samples_bytes(self, target_samples, description_data_id):
-        vsd_size, vsd_offs = self.get_target_sample_description_box(description_data_id)
-        nals_number, codec_private_bytes = self.get_codec_private_bytes_from_vsd_box(vsd_offs, vsd_size)
+        vsd_size, vsd_offs, vsd_type = self.get_target_sample_description_box(description_data_id)
+        video_codec = self.detect_codec(vsd_type)
+        if video_codec is None:
+            raise CodecNotSupportedException(vsd_type)
+        self.print_verbose(f'using codec: {video_codec.get_name()}', ALG_VARS_VERBOSE)
+        codec_size, codec_offs, _ = self.find_box(video_codec.get_extension_name(), vsd_offs + 86, vsd_offs + vsd_size)
+        nals_number, codec_private_bytes = video_codec.get_private_data(self.get_bytes(codec_offs + 8, codec_size - 8))
         samples_converted_packets = bytes()
         min_byte = target_samples[0][SAMPLE_OFFSET_IN_FILE_IDX]
         max_byte = target_samples[-1][SAMPLE_OFFSET_IN_FILE_IDX] + target_samples[-1][SAMPLE_SIZE_IDX]
@@ -379,7 +373,7 @@ class FrameExtractor:
         self.get_bytes(min_byte, max_byte - min_byte)
         for sample_number, sample_offset_in_file, sample_size in target_samples:
             sample_packet = self.get_bytes(sample_offset_in_file, sample_size)
-            conevrted_sample_packet = convert_avcc_packet_to_annex_b(sample_packet, sample_size, nals_number)
+            conevrted_sample_packet = video_codec.decode_packet(sample_packet, sample_size, nals_number)
             converted_sample_packet_with_extradata = combine_packet_with_codec_private_data(conevrted_sample_packet, codec_private_bytes)
             samples_converted_packets += converted_sample_packet_with_extradata
         return samples_converted_packets

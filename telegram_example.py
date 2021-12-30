@@ -5,7 +5,7 @@ from telethon import TelegramClient
 
 from FrameExtractor import FrameExtractor
 from FrameExtractorConstants import ALG_VARS_VERBOSE, SUCCESS_CODE
-from TelegramStreamHandler import TelegramStreamHandler
+from extractor_handlers.TelegramStreamHandler import TelegramStreamHandler
 
 
 def show_image(path):

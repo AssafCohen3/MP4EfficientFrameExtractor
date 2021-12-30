@@ -1,4 +1,4 @@
-from StreamHandlerBase import StreamHandler
+from .StreamHandlerBase import StreamHandler
 from TelethonClient import TelethonClient
 
 

@@ -3,7 +3,7 @@ import os.path
 import cv2
 from FrameExtractor import FrameExtractor
 from FrameExtractorConstants import ALG_VARS_VERBOSE, SUCCESS_CODE
-from FileStreamHandler import FileStreamHandler
+from extractor_handlers.FileStreamHandler import FileStreamHandler
 
 
 def show_image(path):

@@ -55,3 +55,9 @@ class SampleConvertErrorException(ExtractorExceptionBase):
 class VideoTrakNotFoundException(ExtractorExceptionBase):
     def __init__(self):
         super().__init__('no video trak found', VIDEO_TRACK_NOT_FOUND_FAIL_CODE)
+
+
+class CodecNotSupportedException(ExtractorExceptionBase):
+    def __init__(self, found_codec):
+        self.found_codec = found_codec
+        super().__init__(f'codec not supported. found codec: {found_codec}', CODEC_NOT_SUPPORTED_FAIL_CODE)
