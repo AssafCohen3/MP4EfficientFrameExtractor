@@ -11,11 +11,13 @@ class H264Codec(FrameExtractorCodec):
 
     def get_private_data(self, codec_data):
         nals_number = (read_unsigned_byte(codec_data, 4) & 3) + 1
+        nals_types = 0  # we want only sps and pps
         offset_in_box = 5
         codec_private_bytes = bytes()
-        while offset_in_box < len(codec_data):
+        while offset_in_box < len(codec_data) and nals_types < 2:
             nals_num = read_unsigned_byte(codec_data, offset_in_box) & 31
-            offset_in_box += 1
+            offset_in_box += 1  # skip type byte
+            nals_types += 1
             for i in range(0, nals_num):
                 nal_unit_length = read_unsigned_short(codec_data, offset_in_box)
                 offset_in_box += 2
