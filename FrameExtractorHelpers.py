@@ -1,26 +1,28 @@
 import struct
+
+from FrameExtractorConstants import LONG_SIZE, INT_SIZE, SHORT_SIZE, BYTE_SIZE
 from FrameExtractorExceptions import SampleConvertErrorException
 
 
 # bytes unpacking helper methods
 def read_unsigned_long(bytes_to_read_from, offset):
-    return struct.unpack("!Q", bytes_to_read_from[offset: offset + 8])[0]
+    return struct.unpack("!Q", bytes_to_read_from[offset: offset + LONG_SIZE])[0]
 
 
 def read_unsigned_integer(bytes_to_read_from, offset):
-    return struct.unpack("!I", bytes_to_read_from[offset: offset + 4])[0]
+    return struct.unpack("!I", bytes_to_read_from[offset: offset + INT_SIZE])[0]
 
 
 def read_unsigned_short(bytes_to_read_from, offset):
-    return struct.unpack("!H", bytes_to_read_from[offset: offset + 2])[0]
+    return struct.unpack("!H", bytes_to_read_from[offset: offset + SHORT_SIZE])[0]
 
 
 def read_unsigned_byte(bytes_to_read_from, offset):
-    return struct.unpack("!B", bytes_to_read_from[offset: offset + 1])[0]
+    return struct.unpack("!B", bytes_to_read_from[offset: offset + BYTE_SIZE])[0]
 
 
-def read_characters(bytes_to_read_from, offset):
-    return bytes_to_read_from[offset: offset + 4]
+def read_bytes(bytes_to_read_from, offset, number_of_bytes):
+    return bytes_to_read_from[offset: offset + number_of_bytes]
 
 
 # packets converting helpers
@@ -30,9 +32,10 @@ def convert_avcc_packet_to_annex_b(sample_packet_bytes, sample_packet_size, nal_
         offset_in_packet = 0
         while offset_in_packet < sample_packet_size:
             size = read_unsigned_integer(sample_packet_bytes, offset_in_packet)
+            offset_in_packet += INT_SIZE
             res += bytes([0, 0, 0, 1])
-            res += sample_packet_bytes[offset_in_packet + 4: offset_in_packet + 4 + size]
-            offset_in_packet += size + 4
+            res += read_bytes(sample_packet_bytes, offset_in_packet, size)
+            offset_in_packet += size
     else:
         raise SampleConvertErrorException("nal length size defferent then 4 is not supported")
     return res

@@ -34,7 +34,7 @@ except ValueError:
 client = TelegramClient(username, api_id, api_hash)
 client.start(lambda: input('insert your phone: '), lambda: input('insert your password: '))
 handler = TelegramStreamHandler(client, channel_id, 'example.png', verbose=1)
-extractor = FrameExtractor(handler, verbose=ALG_VARS_VERBOSE, target_frame_mult=0.5)
+extractor = FrameExtractor(handler, verbose=ALG_VARS_VERBOSE, target_frame_mult=0.5, target_frame_offset=-1)
 status_code, msg = extractor.extract_frame()
 if status_code == SUCCESS_CODE:
     show_image(handler.get_file_name())

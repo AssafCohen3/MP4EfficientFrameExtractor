@@ -17,9 +17,9 @@ class StscLimitException(ExtractorExceptionBase):
 
 
 class BoxNotFoundException(ExtractorExceptionBase):
-    def __init__(self, box_name):
-        self.box_name = box_name
-        super().__init__(f'box {box_name} not found.', BOX_NOT_FOUND_FAIL_CODE)
+    def __init__(self, *box_names):
+        self.box_names = box_names
+        super().__init__(f'non of {box_names} has been found.', BOX_NOT_FOUND_FAIL_CODE)
 
 
 class DownloadLimitException(ExtractorExceptionBase):

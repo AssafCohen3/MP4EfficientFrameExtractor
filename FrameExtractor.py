@@ -13,9 +13,10 @@ from extractor_handlers.StreamHandlerBase import StreamHandler
 
 
 class FrameExtractor:
-    def __init__(self, stream_handler: StreamHandler, verbose=SUMMERY_VERBOSE, target_frame_mult=1, target_frame_offset=-1,
+    def __init__(self, stream_handler: StreamHandler, verbose=SUMMERY_VERBOSE, target_frame_mult=1, target_frame_offset=0,
                  frames_after=0, chunk_size=DEFAULT_CHUNK_SIZE, chunk_limit=DEFAULT_CHUNKS_LIMIT,
-                 download_threshold=DEFAULT_DOWNLOAD_THRESHHOLD, frames_limit_from_end=0, stsc_size_threshold=DEFAULT_STSC_SIZE_THRESHOLD):
+                 download_threshold=DEFAULT_DOWNLOAD_THRESHHOLD, frames_limit_from_end=0, stsc_size_threshold=DEFAULT_STSC_SIZE_THRESHOLD,
+                 download_limit=DEFAULT_DOWNLOAD_LIMIT, stsc_size_limit=DEFAULT_STSC_SIZE_LIMIT):
         # will cache chunks
         self.chunks_mapper = {}
         # saves how many chunks we used
@@ -40,12 +41,17 @@ class FrameExtractor:
         self.frames_limit_from_end = frames_limit_from_end
         # any stsc size above the threshold will require the confirmation of the user
         self.stsc_size_threshold = stsc_size_threshold
+        # any download size above will raise error
+        self.download_limit = download_limit
+        # any stsc size above will raise error
+        self.stsc_size_limit = stsc_size_limit
         # allow the use of the same extractor multiple times without downloading the boxes' data every time
         self.initiated = False
         # the size of the processed file
         self.file_size = None
-        # caching the boxes for the extractor
+        # supported codecs
         self.codecs: List[FrameExtractorCodec] = [H264Codec(), H265Codec(), MPEG4Codec()]
+        # caching the boxes for the extractor
         self.boxes = {}
 
     def print_verbose(self, to_print, verbose_level):
@@ -65,7 +71,7 @@ class FrameExtractor:
             if 1 < atom_size < 8:  # erroneous size
                 return 0, 0  # file cut
 
-            atom_type = read_characters(box_entry_bytes, 4)
+            atom_type = read_bytes(box_entry_bytes, 4, 4)
             if len(atom_type) < 4:
                 return 0, 0  # file cut
 
@@ -102,7 +108,7 @@ class FrameExtractor:
                 raise BoxNotFoundException("hdlr")
 
             # skip over version and pre-defined
-            trak_type = self.read_characters_direct(hdlr_offs + 16)
+            trak_type = self.read_characters_direct(hdlr_offs + 16, 4)
             self.print_verbose(f'trak type: {trak_type}', BOX_FINDERS_VERBOSE)
 
             if trak_type.decode(encoding='UTF-8') == 'vide':
@@ -144,27 +150,27 @@ class FrameExtractor:
         target_chunk = self.chunks_mapper[required_chunks_offsets[0]]
         for chunk_offset in required_chunks_offsets[1:]:
             target_chunk += self.chunks_mapper[chunk_offset]
-        return target_chunk[offset % self.chunk_size:offset % self.chunk_size + bytes_number]
+        return read_bytes(target_chunk, offset % self.chunk_size, bytes_number)
 
     def read_unsigned_long_direct(self, offset):
-        target_bytes = self.get_bytes(offset, 8)
+        target_bytes = self.get_bytes(offset, LONG_SIZE)
         return read_unsigned_long(target_bytes, 0)
 
     def read_unsigned_integer_direct(self, offset):
-        target_bytes = self.get_bytes(offset, 4)
+        target_bytes = self.get_bytes(offset, INT_SIZE)
         return read_unsigned_integer(target_bytes, 0)
 
     def read_unsigned_short_direct(self, offset):
-        target_bytes = self.get_bytes(offset, 2)
+        target_bytes = self.get_bytes(offset, SHORT_SIZE)
         return read_unsigned_short(target_bytes, 0)
 
     def read_unsigned_byte_direct(self, offset):
-        target_bytes = self.get_bytes(offset, 1)
+        target_bytes = self.get_bytes(offset, BYTE_SIZE)
         return read_unsigned_byte(target_bytes, 0)
 
-    def read_characters_direct(self, offset):
-        target_bytes = self.get_bytes(offset, 4)
-        return read_characters(target_bytes, 0)
+    def read_characters_direct(self, offset, number_of_characters):
+        target_bytes = self.get_bytes(offset, number_of_characters)
+        return read_bytes(target_bytes, 0, number_of_characters)
 
     def ensure_box_exist(self, box_name):
         if box_name not in self.boxes:
@@ -175,8 +181,8 @@ class FrameExtractor:
         stss_offset = self.boxes['stss'][BOX_OFFSET_IDX]
         table_entry_bytes = self.get_bytes(stss_offset, 16)
         number_of_entries = read_unsigned_integer(table_entry_bytes, 12)
-        number_of_entries = round((number_of_entries + self.target_frame_offset) * self.target_frame_mult)
-        offset_from_start = stss_offset + 16 + number_of_entries * 4
+        target_entry = round((self.target_frame_offset % number_of_entries) * self.target_frame_mult)
+        offset_from_start = stss_offset + 16 + target_entry * INT_SIZE
         return self.read_unsigned_integer_direct(offset_from_start)
 
     def get_number_of_samples(self):
@@ -189,8 +195,10 @@ class FrameExtractor:
         stsc_size, stsc_offset = self.boxes['stsc']
         table_entry_bytes = self.get_bytes(stsc_offset, 16)
         number_of_entries = read_unsigned_integer(table_entry_bytes, 12)
+        if stsc_size >= self.stsc_size_limit:
+            raise StscLimitException(stsc_size)
         if stsc_size >= self.stsc_size_threshold:
-            ans = input(f"idiotic chunks split. {stsc_size} to read. continue?(y/n) ") != 'n'
+            ans = input(f"idiotic chunks split. {round(stsc_size / MB_SIZE, 2)} MB to read. continue?(y/n) ") != 'n'
             if not ans:
                 raise StscLimitException(stsc_size)
         self.get_bytes(stsc_offset, stsc_size)
@@ -239,10 +247,10 @@ class FrameExtractor:
         for target_chunk, target_sample_number in zip(target_chunks, target_samples_numbers):
             offset_in_chunk = 0
             target_chunk_samples_entries_bytes = self.get_bytes(
-                stsz_offset + 20 + 4 * (target_chunk[CHUNK_FIRST_SAMPLE_IDX] - 1),
-                (target_sample_number - target_chunk[CHUNK_FIRST_SAMPLE_IDX] + 1) * 4)
+                stsz_offset + 20 + INT_SIZE * (target_chunk[CHUNK_FIRST_SAMPLE_IDX] - 1),
+                (target_sample_number - target_chunk[CHUNK_FIRST_SAMPLE_IDX] + 1) * INT_SIZE)
             for i in range(0, target_sample_number - target_chunk[CHUNK_FIRST_SAMPLE_IDX] + 1):
-                entry_sample_size = read_unsigned_integer(target_chunk_samples_entries_bytes, 4 * i)
+                entry_sample_size = read_unsigned_integer(target_chunk_samples_entries_bytes, INT_SIZE * i)
                 if i + target_chunk[CHUNK_FIRST_SAMPLE_IDX] == target_sample_number:
                     samples_to_ret.append(
                         (i + target_chunk[CHUNK_FIRST_SAMPLE_IDX], offset_in_chunk, entry_sample_size))
@@ -253,17 +261,17 @@ class FrameExtractor:
         atom_to_use = 'stco'
         if 'stco' not in self.boxes:
             if 'co64' not in self.boxes:
-                raise BoxNotFoundException('stco|co64')
+                raise BoxNotFoundException('stco', 'co64')
             atom_to_use = 'co64'
         stco_offset = self.boxes[atom_to_use][BOX_OFFSET_IDX]
         offsets_to_return = []
         for target_chunk in target_chunks:
             if atom_to_use == 'stco':
                 offsets_to_return.append(
-                    self.read_unsigned_integer_direct(stco_offset + 16 + (target_chunk[CHUNK_NUMBER_IDX] - 1) * 4))
+                    self.read_unsigned_integer_direct(stco_offset + 16 + (target_chunk[CHUNK_NUMBER_IDX] - 1) * INT_SIZE))
             else:
                 offsets_to_return.append(
-                    self.read_unsigned_long_direct(stco_offset + 16 + (target_chunk[CHUNK_NUMBER_IDX] - 1) * 8))
+                    self.read_unsigned_long_direct(stco_offset + 16 + (target_chunk[CHUNK_NUMBER_IDX] - 1) * LONG_SIZE))
         return offsets_to_return
 
     def get_target_sample_description_box(self, target_sample_id):
@@ -273,7 +281,7 @@ class FrameExtractor:
         while offset_in_box < stsd_size:
             entry_bytes = self.get_bytes(stsd_offset + offset_in_box, 16)
             entry_size = read_unsigned_integer(entry_bytes, 0)
-            entry_type = read_characters(entry_bytes, 4)
+            entry_type = read_bytes(entry_bytes, 4, 4)
             entry_id = read_unsigned_short(entry_bytes, 14)
             if entry_id == target_sample_id:
                 return entry_size, stsd_offset + offset_in_box, entry_type.decode(encoding='UTF-8')
@@ -322,7 +330,7 @@ class FrameExtractor:
         if stco_size == 0:
             co64_size, co64_offs, _ = self.find_box('co64', stbl_offs + 8, stbl_offs + stbl_size)
             if co64_size == 0:
-                raise BoxNotFoundException('stco|co64')
+                raise BoxNotFoundException('stco', 'co64')
             self.boxes['co64'] = (co64_size, co64_offs)
         else:
             self.boxes['stco'] = (stco_size, stco_offs)
@@ -336,6 +344,7 @@ class FrameExtractor:
         target_sample_number = self.get_target_key_sample()
         self.print_verbose(f"target sample number: {target_sample_number}", ALG_VARS_VERBOSE)
         number_of_samples = self.get_number_of_samples()
+        self.print_verbose(f"video samples count: {number_of_samples}", ALG_VARS_VERBOSE)
         target_samples_numbers = [n for n in range(target_sample_number, max(target_sample_number + 1,
                                                                              min(number_of_samples - self.frames_limit_from_end,
                                                                                  target_sample_number + self.frames_after) + 1))]
@@ -364,19 +373,22 @@ class FrameExtractor:
         samples_converted_packets = bytes()
         min_byte = target_samples[0][SAMPLE_OFFSET_IN_FILE_IDX]
         max_byte = target_samples[-1][SAMPLE_OFFSET_IN_FILE_IDX] + target_samples[-1][SAMPLE_SIZE_IDX]
-        if max_byte - min_byte > self.download_threshold:
+        download_size = max_byte - min_byte
+        if download_size >= self.download_limit:
+            raise DownloadLimitException(download_size)
+        elif download_size > self.download_threshold:
             self.stream_handler.describe_stream()
-            print(f"warning!!! download size {max_byte - min_byte} above download threshhold.")
+            print(f"warning!!! download size {round(download_size/MB_SIZE, 2)} MB above download threshhold.")
             ans = input("procceed?(y/n) ") != 'n'
             if not ans:
-                return
-        self.get_bytes(min_byte, max_byte - min_byte)
+                raise DownloadLimitException(download_size)
+        self.get_bytes(min_byte, download_size)
         for sample_number, sample_offset_in_file, sample_size in target_samples:
             sample_packet = self.get_bytes(sample_offset_in_file, sample_size)
             conevrted_sample_packet = video_codec.decode_packet(sample_packet, sample_size, nals_number)
-            converted_sample_packet_with_extradata = combine_packet_with_codec_private_data(conevrted_sample_packet, codec_private_bytes)
-            samples_converted_packets += converted_sample_packet_with_extradata
-        return samples_converted_packets
+            samples_converted_packets += conevrted_sample_packet
+        converted_samples_packets_with_extradata = combine_packet_with_codec_private_data(samples_converted_packets, codec_private_bytes)
+        return converted_samples_packets_with_extradata
 
     def save_packets_and_extract_last_frame(self, samples_valid_packets):
         with open("tmp.mp4", "wb") as fw:
@@ -408,6 +420,6 @@ class FrameExtractor:
         if self.verbose >= SUMMERY_VERBOSE:
             print(f"success!!!!!")
             print(f"used chunks: {self.chunks_count}.")
-            print(f"used memory: {round((self.chunks_count * self.chunk_size) / (1024 * 1000), 2)} MB")
-            print(f"saved memory: {round((self.get_file_size() - (self.chunks_count * self.chunk_size)) / (1024 * 1000), 2)} MB")
+            print(f"used memory: {round((self.chunks_count * self.chunk_size) / MB_SIZE, 2)} MB")
+            print(f"saved memory: {round((self.get_file_size() - (self.chunks_count * self.chunk_size)) / MB_SIZE, 2)} MB")
         return SUCCESS_CODE, f'frame extracted to {self.stream_handler.get_file_name()}'

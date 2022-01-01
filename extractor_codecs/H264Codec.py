@@ -1,5 +1,5 @@
-from FrameExtractorHelpers import *
 from .FrameExtractorCodecBase import FrameExtractorCodec
+from FrameExtractorHelpers import *
 
 
 class H264Codec(FrameExtractorCodec):
@@ -16,12 +16,12 @@ class H264Codec(FrameExtractorCodec):
         codec_private_bytes = bytes()
         while offset_in_box < len(codec_data) and nals_types < 2:
             nals_num = read_unsigned_byte(codec_data, offset_in_box) & 31
-            offset_in_box += 1  # skip type byte
+            offset_in_box += BYTE_SIZE
             nals_types += 1
             for i in range(0, nals_num):
                 nal_unit_length = read_unsigned_short(codec_data, offset_in_box)
-                offset_in_box += 2
-                data = codec_data[offset_in_box: offset_in_box + nal_unit_length]
+                offset_in_box += SHORT_SIZE
+                data = read_bytes(codec_data, offset_in_box, nal_unit_length)
                 offset_in_box += nal_unit_length
                 codec_private_bytes += bytes([0, 0, 0, 1])
                 codec_private_bytes += data

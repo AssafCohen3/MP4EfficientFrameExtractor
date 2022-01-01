@@ -10,19 +10,19 @@ class H265Codec(FrameExtractorCodec):
         return 'hvcC'
 
     def get_private_data(self, codec_data):
-        nals_number = (read_unsigned_byte(codec_data, 22) & 3) + 1
         codec_private_bytes = bytes()
+        nals_number = (read_unsigned_byte(codec_data, 22) & 3) + 1
         offset_in_box = 23
-        nals_types = 0  # we want only vps, sps and pps
+        nals_types = 0  # we want to iterate only vps, sps and pps
         while offset_in_box < len(codec_data) and nals_types < 3:
-            offset_in_box += 1  # skip nal_type byte
+            offset_in_box += BYTE_SIZE  # skip nal_type byte
             nals_num = read_unsigned_short(codec_data, offset_in_box)
-            offset_in_box += 2
+            offset_in_box += SHORT_SIZE
             nals_types += 1
             for i in range(0, nals_num):
                 nal_unit_length = read_unsigned_short(codec_data, offset_in_box)
-                offset_in_box += 2
-                data = codec_data[offset_in_box: offset_in_box + nal_unit_length]
+                offset_in_box += SHORT_SIZE
+                data = read_bytes(codec_data, offset_in_box, nal_unit_length)
                 offset_in_box += nal_unit_length
                 codec_private_bytes += bytes([0, 0, 0, 1])
                 codec_private_bytes += data
