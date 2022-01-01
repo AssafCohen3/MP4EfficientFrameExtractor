@@ -8,18 +8,16 @@ class TelegramStreamHandler(StreamHandler):
         self.file_name = file_name
         self.tel_client = TelethonClient(client, verbose)
         self.client = client
-        video_id_to_target, video_size = self.run_async(self.tel_client.get_last_video_id_and_size_in_channel, channel_id)
-        self.message_id = video_id_to_target
-        self.file_size = video_size
+        self.message_to_target = self.run_async(self.tel_client.get_last_video_in_channel, channel_id)
 
     def get_file_size(self):
-        return self.file_size
+        return self.message_to_target.file.size
 
     def get_file_name(self):
         return self.file_name
 
     def read_chunks(self, offset, chunks_number, chunk_size):
-        to_return = self.run_async(self.tel_client.get_video_chunks, self.channel_id, self.message_id, offset, chunks_number, chunk_size)
+        to_return = self.run_async(self.tel_client.get_video_chunks, self.message_to_target, offset, chunks_number, chunk_size)
         return to_return
 
     def describe_stream(self):

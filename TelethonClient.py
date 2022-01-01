@@ -9,17 +9,16 @@ class TelethonClient:
         self.client = client
         self.verbose = verbose
 
-    async def get_last_video_id_and_size_in_channel(self, channel_id):
+    async def get_last_video_in_channel(self, channel_id):
         msgs = [m async for m in self.client.iter_messages(channel_id, filter=InputMessagesFilterVideo(), limit=1)]
         if not msgs:
             print(f"there is no videos in channel {channel_id}")
             exit(1)
-        return msgs[0].id, msgs[0].file.size
+        return msgs[0]
 
-    async def get_video_chunks(self, channel_id, message_id, offset, chunks_number, chunk_size):
-        message = [m async for m in self.client.iter_messages(channel_id, ids=message_id)][0]
+    async def get_video_chunks(self, message, offset, chunks_number, chunk_size):
         if self.verbose >= 1:
-            print(f"downloading {chunk_size*chunks_number} bytes from offset {offset} of video {message_id} in channel {channel_id}...")
+            print(f"downloading {chunk_size*chunks_number} bytes from offset {offset} of video {message.id} in channel {message.chat.id}...")
         to_return = {}
         i = 0
         while True:
