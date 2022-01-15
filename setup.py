@@ -1,8 +1,8 @@
 from distutils.core import setup
 
 setup(
-    name = 'frameExtractor',
-    packages = ['frameExtractor'],
+    name = 'mp4FrameExtractor',
+    packages = ['mp4FrameExtractor'],
     version = 'v1.0',  # Ideally should be same as your GitHub release tag varsion
     description = 'extracting frames from mp4 using minimal space(great for remote files)',
     author = 'Assaf Cohen',
