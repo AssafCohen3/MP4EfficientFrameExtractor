@@ -3,9 +3,9 @@ import os
 import cv2
 from telethon import TelegramClient
 
-from FrameExtractor import FrameExtractor
-from FrameExtractorConstants import ALG_VARS_VERBOSE, SUCCESS_CODE
-from extractor_handlers.TelegramStreamHandler import TelegramStreamHandler
+from frameExtractor.FrameExtractor import FrameExtractor
+from frameExtractor.FrameExtractorConstants import ALG_VARS_VERBOSE, SUCCESS_CODE
+from frameExtractor.extractor_handlers.TelegramStreamHandler import TelegramStreamHandler
 
 
 def show_image(path):

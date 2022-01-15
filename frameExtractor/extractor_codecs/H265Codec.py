@@ -1,22 +1,23 @@
 from .FrameExtractorCodecBase import FrameExtractorCodec
-from FrameExtractorHelpers import *
+from frameExtractor.FrameExtractorHelpers import *
 
 
-class H264Codec(FrameExtractorCodec):
+class H265Codec(FrameExtractorCodec):
     def get_name(self):
-        return 'avc1'
+        return 'hev1'
 
     def get_extension_name(self):
-        return 'avcC'
+        return 'hvcC'
 
     def get_private_data(self, codec_data):
-        nals_number = (read_unsigned_byte(codec_data, 4) & 3) + 1
-        nals_types = 0  # we want only sps and pps
-        offset_in_box = 5
         codec_private_bytes = bytes()
-        while offset_in_box < len(codec_data) and nals_types < 2:
-            nals_num = read_unsigned_byte(codec_data, offset_in_box) & 31
-            offset_in_box += BYTE_SIZE
+        nals_number = (read_unsigned_byte(codec_data, 22) & 3) + 1
+        offset_in_box = 23
+        nals_types = 0  # we want to iterate only vps, sps and pps
+        while offset_in_box < len(codec_data) and nals_types < 3:
+            offset_in_box += BYTE_SIZE  # skip nal_type byte
+            nals_num = read_unsigned_short(codec_data, offset_in_box)
+            offset_in_box += SHORT_SIZE
             nals_types += 1
             for i in range(0, nals_num):
                 nal_unit_length = read_unsigned_short(codec_data, offset_in_box)

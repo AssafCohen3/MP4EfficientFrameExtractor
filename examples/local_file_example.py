@@ -1,9 +1,9 @@
 import os.path
 
 import cv2
-from FrameExtractor import FrameExtractor
-from FrameExtractorConstants import ALG_VARS_VERBOSE, SUCCESS_CODE
-from extractor_handlers.FileStreamHandler import FileStreamHandler
+from frameExtractor.FrameExtractor import FrameExtractor
+from frameExtractor.FrameExtractorConstants import ALG_VARS_VERBOSE, SUCCESS_CODE
+from frameExtractor.extractor_handlers.FileStreamHandler import FileStreamHandler
 
 
 def show_image(path):

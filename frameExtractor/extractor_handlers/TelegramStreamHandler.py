@@ -1,5 +1,5 @@
 from .StreamHandlerBase import StreamHandler
-from TelethonClient import TelethonClient
+from examples.TelethonClient import TelethonClient
 
 
 class TelegramStreamHandler(StreamHandler):
